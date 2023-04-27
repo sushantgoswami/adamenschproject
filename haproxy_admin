@@ -39,11 +39,11 @@ fi
 echo "------------------------------------------------------------------------------------------------------"
 
 if [ $HAPROXY_MAIN_STATUS != 0 ]; then
- echo -e "${Green}$HOSTNAME: The haproxy loadbalancer is running on SLOT 01 (main), means the beta website in running from SLOT 01${ENDCOLOR}"
+ echo -e "${Green}$HOSTNAME: The haproxy loadbalancer is running on SLOT 01 (main), means the main website in running from SLOT 01${ENDCOLOR}"
 fi
 
 if [ $HAPROXY_REVERSE_STATUS != 0 ]; then
- echo -e "${Red}$HOSTNAME: The haproxy loadbalancer is running on SLOT 02 (shadow), means the beta website in running from SLOT 02${ENDCOLOR}"
+ echo -e "${Red}$HOSTNAME: The haproxy loadbalancer is running on SLOT 02 (shadow), means the main website in running from SLOT 02${ENDCOLOR}"
 fi
 
 echo "------------------------------------------------------------------------------------------------------"
@@ -197,11 +197,10 @@ echo "##### haproxy-shadow.reverse.cfg #####" > /etc/haproxy/templates/haproxy-s
 
 while read -r line;
  do
- HOST=`echo "$line" | awk '{print $1}'` 
- echo "    server $line:8080 check cookie $HOST" >> /etc/haproxy/templates/haproxy-main.cfg.backend.runtime
- echo "    server $line:8081 check cookie $HOST" >> /etc/haproxy/templates/haproxy-main.reverse.cfg.backend.runtime
- echo "    server $line:8080 check cookie $HOST" >> /etc/haproxy/templates/haproxy-shadow.cfg.backend.runtime
- echo "    server $line:8081 check cookie $HOST" >> /etc/haproxy/templates/haproxy-shadow.reverse.cfg.backend.runtime
+ echo "    server $line:8080 check" >> /etc/haproxy/templates/haproxy-main.cfg.backend.runtime
+ echo "    server $line:8081 check" >> /etc/haproxy/templates/haproxy-main.reverse.cfg.backend.runtime
+ echo "    server $line:8080 check" >> /etc/haproxy/templates/haproxy-shadow.cfg.backend.runtime
+ echo "    server $line:8081 check" >> /etc/haproxy/templates/haproxy-shadow.reverse.cfg.backend.runtime
  done < /tmp/balance_member.txt
 
 echo "Node configuration are created, please verify the nodes below"
@@ -253,18 +252,9 @@ if [ $ANS == "yes" ]; then
 fi
 }
 
-get_status()
+swap_lb003_slots()
 {
- HAPROXY_MAIN_STATUS=`ps -ef | grep "/usr/sbin/haproxy" | grep -v grep | grep -v reverse | wc -l`
- HAPROXY_REVERSE_STATUS=`ps -ef | grep "/usr/sbin/haproxy" | grep -v grep | grep reverse | wc -l`
- echo "------------------------------------------------------------------------------------------------------"
- if [ $HAPROXY_MAIN_STATUS != 0 ]; then
-  echo -e "${Green}$HOSTNAME: The haproxy loadbalancer is running on SLOT 01 (main), means the main website in running from SLOT 01${ENDCOLOR}"
- fi
- if [ $HAPROXY_REVERSE_STATUS != 0 ]; then
-  echo -e "${Red}$HOSTNAME: The haproxy loadbalancer is running on SLOT 02 (shadow), means the main website in running from SLOT 02${ENDCOLOR}"
- fi
- echo "------------------------------------------------------------------------------------------------------"
+ su - BetterAdmin -c 'timeout 3s ssh DA-LIVE-BC-LB003 /etc/init.d/haproxy_remote_switch'
 }
 
 #---------------------------------------------------------------#
@@ -278,7 +268,8 @@ echo -e "= 1. Reload HAproxy configuration on ${Green}SLOT 01${ENDCOLOR} only   
 echo -e "= 2. Reload HAproxy configuration on ${Red}SLOT 02${ENDCOLOR} only                  ="
 echo "= 3. Reload HAproxy configuration on both SLOT 01 and SLOT 02      ="
 echo "= 4. Swap HAproxy configuration Slots                              ="
-echo -e "= 5. ${Blue}Create new configuration files after adding new node${ENDCOLOR}          ="
+echo "= 5. Swap HAproxy configuration Slots on LB003                     ="
+echo -e "= 6. ${Blue}Create new configuration files after adding new node${ENDCOLOR}          ="
 echo "= 0,q. Exit the script                                             ="
 echo "===================================================================="
 
@@ -317,8 +308,11 @@ if [ $ANSWER == "2" ]; then
 fi
 
 if [ $ANSWER == "5" ]; then
+ swap_lb003_slots
+fi
+
+if [ $ANSWER == "6" ]; then
  create_config
- # echo "this feature is disabled"
 fi
 
 if [ $ANSWER == "0" ] || [ $ANSWER == "q" ]; then
@@ -351,12 +345,6 @@ if [ $1 == "$KEY" ] && [ $2 == "swap-slots" ]; then
  echo "$0: swap the slots instruction recieved" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
  swap_switch
 fi
-
-if [ $1 == "$KEY" ] && [ $2 == "get-status" ]; then
- echo "$0: Get the status instruction recieved" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
- get_status
-fi
-
 
 fi
 
