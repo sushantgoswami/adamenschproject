@@ -1,0 +1,7 @@
+#---------------------------------------------------------------------
+# round robin balancing between the various backends
+#---------------------------------------------------------------------
+backend be_beta-damensch_com
+    balance     roundrobin
+    cookie SERVERUSED insert indirect nocache
+    option httpchk HEAD /

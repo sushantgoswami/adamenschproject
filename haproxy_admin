@@ -1,0 +1,363 @@
+#!/bin/bash
+
+Black='\033[0;30m'        # Black
+Red='\033[0;31m'          # Red
+Green='\033[0;32m'        # Green
+Yellow='\033[0;33m'       # Yellow
+Blue='\033[0;34m'         # Blue
+Purple='\033[0;35m'       # Purple
+Cyan='\033[0;36m'         # Cyan
+White='\033[0;37m'        # White
+ENDCOLOR='\033[0m'              # No Color
+
+KEY=9345
+HOSTNAME=`hostname`
+
+source /etc/init.d/.env
+LOGFILE0=/var/log/damensch_0.log
+HIGH_ALERT_DIR=/home/BetterAdmin/alerts/high
+MED_ALERT_DIR=/home/BetterAdmin/alerts/med
+LOW_ALERT_DIR=/home/BetterAdmin/alerts/low
+###################################################################
+
+HAPROXY_MAIN_STATUS=`ps -ef | grep "/usr/sbin/haproxy" | grep -v grep | grep -v reverse | wc -l`
+HAPROXY_REVERSE_STATUS=`ps -ef | grep "/usr/sbin/haproxy" | grep -v grep | grep reverse | wc -l`
+
+if [ $HAPROXY_MAIN_STATUS = 0 ] && [ $HAPROXY_REVERSE_STATUS = 0 ]; then
+ echo "Haproxy is not running, do you want to start it"
+ read -p "Please Enter the input: " ANSWER
+
+ if [ $ANSWER == "yes" ]; then
+  echo "yes is choosen, starting haproxy on SLOT 01"
+  echo "$0: haproxy started on SLOT 01" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-main.cfg -p /run/haproxy-main.pid &
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-shadow.cfg -p /run/haproxy-shadow.pid &
+  exit 0;
+ fi
+fi
+
+echo "------------------------------------------------------------------------------------------------------"
+
+if [ $HAPROXY_MAIN_STATUS != 0 ]; then
+ echo -e "${Green}$HOSTNAME: The haproxy loadbalancer is running on SLOT 01 (main), means the beta website in running from SLOT 01${ENDCOLOR}"
+fi
+
+if [ $HAPROXY_REVERSE_STATUS != 0 ]; then
+ echo -e "${Red}$HOSTNAME: The haproxy loadbalancer is running on SLOT 02 (shadow), means the beta website in running from SLOT 02${ENDCOLOR}"
+fi
+
+echo "------------------------------------------------------------------------------------------------------"
+
+alert_haproxy_shadow_slot01()
+{
+python3 $HIGH_ALERT_DIR/alert_haproxy_shadow_slot01.py
+}
+alert_haproxy_shadow_slot02()
+{
+python3 $HIGH_ALERT_DIR/alert_haproxy_shadow_slot02.py
+}
+alert_haproxy_main_slot01()
+{
+python3 $HIGH_ALERT_DIR/alert_haproxy_main_slot01.py
+}
+alert_haproxy_main_slot02()
+{
+python3 $HIGH_ALERT_DIR/alert_haproxy_main_slot02.py
+}
+alert_haproxy_swapped_main_to_slot01()
+{
+python3 $HIGH_ALERT_DIR/alert_haproxy_swapped_main_to_slot01.py
+}
+alert_haproxy_swapped_main_to_slot02()
+{
+python3 $HIGH_ALERT_DIR/alert_haproxy_swapped_main_to_slot02.py
+}
+alert_haproxy_reloaded_both_slots()
+{
+python3 $HIGH_ALERT_DIR/alert_haproxy_reloaded_both_slots.py
+}
+
+echo "------------------------------------------------------------------------------------------------------"
+
+
+reload_slot01()
+{
+ if [ $HAPROXY_MAIN_STATUS != 0 ]; then
+  kill -9 `ps -ef | grep "/usr/sbin/haproxy" | grep -v shadow | grep -v reverse | grep -v grep | awk '{print $2}'`
+  echo "$0: haproxy reloaded on SLOT 01" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-main.cfg -p /run/haproxy-main.pid &
+  alert_haproxy_main_slot01
+  exit 0;
+ fi
+ if [ $HAPROXY_REVERSE_STATUS != 0 ]; then
+  kill -9 `ps -ef | grep "/usr/sbin/haproxy" | grep -v main | grep reverse | grep -v grep | awk '{print $2}'`
+  echo "$0: haproxy reloaded on SLOT 01" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-shadow.reverse.cfg -p /run/haproxy-shadow.pid &
+  alert_haproxy_shadow_slot01
+  exit 0;
+ fi
+}
+
+reload_slot02()
+{
+ if [ $HAPROXY_MAIN_STATUS != 0 ]; then
+  kill -9 `ps -ef | grep "/usr/sbin/haproxy" | grep -v main | grep -v reverse | grep -v grep | awk '{print $2}'`
+  echo "$0: haproxy reloaded on SLOT 02" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-shadow.cfg -p /run/haproxy-shadow.pid &
+  alert_haproxy_shadow_slot02
+  exit 0;
+ fi
+ if [ $HAPROXY_REVERSE_STATUS != 0 ]; then
+  kill -9 `ps -ef | grep "/usr/sbin/haproxy" | grep -v shadow | grep reverse | grep -v grep | awk '{print $2}'`
+  echo "$0: haproxy reloaded on SLOT 02" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-main.reverse.cfg -p /run/haproxy-main.pid &
+  alert_haproxy_main_slot02
+  exit 0;
+ fi
+}
+
+reload_both()
+{
+ if [ $HAPROXY_MAIN_STATUS != 0 ]; then
+  kill -9 `ps -ef | grep "/usr/sbin/haproxy" | grep -v grep | awk '{print $2}'`
+  echo "$0: haproxy reloaded on both SLOTS" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-main.cfg -p /run/haproxy-main.pid &
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-shadow.cfg -p /run/haproxy-shadow.pid &
+  alert_haproxy_reloaded_both_slots
+  exit 0;
+ fi
+ if [ $HAPROXY_REVERSE_STATUS != 0 ]; then
+  kill -9 `ps -ef | grep "/usr/sbin/haproxy" | grep -v grep | awk '{print $2}'`
+  echo "$0: haproxy reloaded on both SLOTS" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-main.reverse.cfg -p /run/haproxy-main.pid &
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-shadow.reverse.cfg -p /run/haproxy-shadow.pid &
+  alert_haproxy_reloaded_both_slots
+  exit 0;
+ fi
+}
+
+swap_switch()
+{
+ if [ $HAPROXY_MAIN_STATUS -ne 0 ]; then
+  echo "Changing load to SLOT 02"
+  kill -9 `ps -ef | grep "/usr/sbin/haproxy" | grep -v grep | awk '{print $2}'`
+  sleep 1
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-main.reverse.cfg -p /run/haproxy-main.pid &
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-shadow.reverse.cfg -p /run/haproxy-shadow.pid &
+  echo "---------------------------------------------------------------------"
+  echo "Changed load to SLOT 02, run this command again to check the status" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+  echo "---------------------------------------------------------------------"
+  alert_haproxy_swapped_main_to_slot02
+ fi
+ if [ $HAPROXY_REVERSE_STATUS -ne 0 ]; then
+  echo "Changing load to SLOT 01"
+  kill -9 `ps -ef | grep "/usr/sbin/haproxy" | grep -v grep | awk '{print $2}'`
+  sleep 1
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-main.cfg -p /run/haproxy-main.pid &
+  /usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy-shadow.cfg -p /run/haproxy-shadow.pid &
+  echo "---------------------------------------------------------------------"
+  echo "Changed load to SLOT 01, run this command again to check the status" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+  echo "---------------------------------------------------------------------"
+  alert_haproxy_swapped_main_to_slot01
+ fi
+}
+
+create_config()
+
+{
+#!/bin/bash
+
+BALANCE_MEM_PATH=/home/BetterAdmin/balance_member
+
+#################################################
+>/tmp/balance_member.txt
+
+for i in `ls $BALANCE_MEM_PATH`
+ do
+  HOSTNAME=`echo $BALANCE_MEM_PATH/$i | awk -F '/' '{print $NF}'`
+  IPADDR=`cat $BALANCE_MEM_PATH/$i`
+  PING_CHK=`ping -c 1 $IPADDR | grep "1 received" | wc -l`
+  if [ $PING_CHK == 0 ]; then
+   echo "#---------------------------------------------------------------"
+   echo "Node $HOSTNAME $IPADDR is not reachable, please evict the node later from $BALANCE_MEM_PATH. Currently the script will not add this node for load balancing."
+  else
+   echo "#---------------------------------------------------------------"
+   echo "Node $HOSTNAME $IPADDR added for load balancing"
+   echo $HOSTNAME $IPADDR >> /tmp/balance_member.txt
+  fi
+ done
+
+sleep 1
+echo "#---------------------------------------------------------------#"
+echo "#---------------------------------------------------------------#"
+echo "##### haproxy-main.cfg #####" > /etc/haproxy/templates/haproxy-main.cfg.backend.runtime
+echo "##### haproxy-main.reverse.cfg #####" > /etc/haproxy/templates/haproxy-main.reverse.cfg.backend.runtime
+echo "##### haproxy-shadow.cfg #####" > /etc/haproxy/templates/haproxy-shadow.cfg.backend.runtime
+echo "##### haproxy-shadow.reverse.cfg #####" > /etc/haproxy/templates/haproxy-shadow.reverse.cfg.backend.runtime
+
+while read -r line;
+ do
+ HOST=`echo "$line" | awk '{print $1}'` 
+ echo "    server $line:8080 check cookie $HOST" >> /etc/haproxy/templates/haproxy-main.cfg.backend.runtime
+ echo "    server $line:8081 check cookie $HOST" >> /etc/haproxy/templates/haproxy-main.reverse.cfg.backend.runtime
+ echo "    server $line:8080 check cookie $HOST" >> /etc/haproxy/templates/haproxy-shadow.cfg.backend.runtime
+ echo "    server $line:8081 check cookie $HOST" >> /etc/haproxy/templates/haproxy-shadow.reverse.cfg.backend.runtime
+ done < /tmp/balance_member.txt
+
+echo "Node configuration are created, please verify the nodes below"
+for i in `ls /etc/haproxy/templates/*.runtime`
+ do
+  echo "#---------------------------------------------------------------#"
+  cat $i
+  echo "#---------------------------------------------------------------#"
+ done
+
+read -p "Are you sure to contineu with the current configuration: type yes/no: " ANS
+
+if [ $ANS == "yes" ]; then
+ for i in haproxy-main.cfg haproxy-main.reverse.cfg haproxy-shadow.cfg haproxy-shadow.reverse.cfg
+  do
+   cat /etc/haproxy/templates/$i.tpl > /etc/haproxy/templates/$i
+   cat /etc/haproxy/templates/$i.frontend >> /etc/haproxy/templates/$i
+   cat /etc/haproxy/templates/$i.backend >> /etc/haproxy/templates/$i
+   cat /etc/haproxy/templates/$i.backend.runtime >> /etc/haproxy/templates/$i
+  done
+else
+ echo "Not get yes input, Exitting"
+ exit 0;
+fi
+echo "#---------------------------------------------------------------#"
+echo "haproxy configuration files are created, do you want to merge the files to the main configuration"
+echo "#---------------------------------------------------------------#"
+read -p "Are you sure to contineu with the merging: type yes/no: " ANS
+
+if [ $ANS == "yes" ]; then
+ CURRENT_DATE=`date | awk '{print $3"-"$2"-"$6"-"$4"-"$5}'`
+ mkdir /etc/haproxy/backup/config-$CURRENT_DATE
+ mv /etc/haproxy/*.cfg /etc/haproxy/backup/config-$CURRENT_DATE/
+ cp /etc/haproxy/templates/haproxy-main.cfg /etc/haproxy/
+ cp /etc/haproxy/templates/haproxy-main.reverse.cfg /etc/haproxy/
+ cp /etc/haproxy/templates/haproxy-shadow.cfg /etc/haproxy/
+ cp /etc/haproxy/templates/haproxy-shadow.reverse.cfg /etc/haproxy/
+ echo "#---------------------------------------------------------------#"
+ echo "Configuration files are copied in to /etc/haproxy directory, do you want to reload the configuration"
+ read -p "Are you sure to contineu with reload the configuration: type yes/no: " ANS
+ echo "#---------------------------------------------------------------#"
+ if [ $ANS == "yes" ]; then
+  echo "reloading configuration ........"
+  reload_both
+  echo "#---------------------------------------------------------------#"
+  echo "done ..., press enter to return to prompt"
+  echo "#---------------------------------------------------------------#"
+ fi
+fi
+}
+
+get_status()
+{
+ HAPROXY_MAIN_STATUS=`ps -ef | grep "/usr/sbin/haproxy" | grep -v grep | grep -v reverse | wc -l`
+ HAPROXY_REVERSE_STATUS=`ps -ef | grep "/usr/sbin/haproxy" | grep -v grep | grep reverse | wc -l`
+ echo "------------------------------------------------------------------------------------------------------"
+ if [ $HAPROXY_MAIN_STATUS != 0 ]; then
+  echo -e "${Green}$HOSTNAME: The haproxy loadbalancer is running on SLOT 01 (main), means the main website in running from SLOT 01${ENDCOLOR}"
+ fi
+ if [ $HAPROXY_REVERSE_STATUS != 0 ]; then
+  echo -e "${Red}$HOSTNAME: The haproxy loadbalancer is running on SLOT 02 (shadow), means the main website in running from SLOT 02${ENDCOLOR}"
+ fi
+ echo "------------------------------------------------------------------------------------------------------"
+}
+
+#---------------------------------------------------------------#
+
+if [ -z $1 ]; then
+
+echo "===================================================================="
+echo "=            Select the service you want to execute                ="
+echo "===================================================================="
+echo -e "= 1. Reload HAproxy configuration on ${Green}SLOT 01${ENDCOLOR} only                  ="
+echo -e "= 2. Reload HAproxy configuration on ${Red}SLOT 02${ENDCOLOR} only                  ="
+echo "= 3. Reload HAproxy configuration on both SLOT 01 and SLOT 02      ="
+echo "= 4. Swap HAproxy configuration Slots                              ="
+echo -e "= 5. ${Blue}Create new configuration files after adding new node${ENDCOLOR}          ="
+echo "= 0,q. Exit the script                                             ="
+echo "===================================================================="
+
+read -p "Please Enter the number as input: " ANSWER
+
+if [ $ANSWER == "4" ]; then
+ echo "Do you want to SWAP the configuration on both the SLOTS"
+ read -p "Please Enter the input: " ANSWER
+ if [ $ANSWER == "yes" ]; then
+  swap_switch
+ fi
+fi
+
+if [ $ANSWER == "3" ]; then
+ echo "Do you want to reload the configuration on both the SLOTS"
+ read -p "Please Enter the input: " ANSWER
+ if [ $ANSWER == "yes" ]; then
+  reload_both
+ fi
+fi
+
+if [ $ANSWER == "1" ]; then
+ echo "Do you want to reload the configuration in existing SLOT 01"
+ read -p "Please Enter the input: " ANSWER
+ if [ $ANSWER == "yes" ]; then
+  reload_slot01
+ fi
+fi
+
+if [ $ANSWER == "2" ]; then
+ echo "Do you want to reload the configuration in existing SLOT 02"
+ read -p "Please Enter the input: " ANSWER
+ if [ $ANSWER == "yes" ]; then
+  reload_slot02
+ fi
+fi
+
+if [ $ANSWER == "5" ]; then
+ create_config
+ # echo "this feature is disabled"
+fi
+
+if [ $ANSWER == "0" ] || [ $ANSWER == "q" ]; then
+ echo "Exiting the script ..."
+ exit 0;
+fi
+
+fi
+
+#---------------------------------------------------------------#
+
+if [ ! -z $1 ] && [ ! -z $2 ]; then
+
+if [ $1 == "$KEY" ] && [ $2 == "reload-slot01" ]; then
+ echo "$0: reload slot 01 instruction recieved" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+ reload_slot01
+fi
+
+if [ $1 == "$KEY" ] && [ $2 == "reload-slot02" ]; then
+ echo "$0: reload slot 02 instruction recieved" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+ reload_slot02
+fi
+
+if [ $1 == "$KEY" ] && [ $2 == "reload-both" ]; then
+ echo "$0: reload both slots instruction recieved" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+ reload_both
+fi
+
+if [ $1 == "$KEY" ] && [ $2 == "swap-slots" ]; then
+ echo "$0: swap the slots instruction recieved" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+ swap_switch
+fi
+
+if [ $1 == "$KEY" ] && [ $2 == "get-status" ]; then
+ echo "$0: Get the status instruction recieved" | sed -e "s/^/$(date | awk '{print $3"-"$2"-"$6"-"$4}') /" | tee -a $LOGFILE0
+ get_status
+fi
+
+
+fi
+
+#---------------------------------------------------------------#

@@ -1,0 +1,18 @@
+#---------------------------------------------------------------------
+# main frontend which proxys to the backends
+#---------------------------------------------------------------------
+
+frontend beta-damensch.com
+    bind 0.0.0.0:443 ssl crt /etc/haproxy/Certificates/beta-damensch.com_chain alpn h2,http/1.1 crt-ignore-err all
+    mode http
+    acl http     ssl_fc,not
+    acl host_www hdr_beg(host) www.
+    http-request redirect prefix https://www.beta-damensch.com if http or !host_www
+    default_backend             be_beta-damensch_com
+
+frontend stats
+    bind 127.0.0.1:9080
+    stats enable
+    stats uri /stats_main
+    stats refresh 10s
+
